@@ -802,6 +802,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .frow{display:flex;gap:6px;align-items:center;margin-bottom:6px}
   .frow select{flex:1;min-width:0}
   .frow input[type=number]{width:70px}
+  .plz{display:flex;gap:8px;align-items:flex-end;margin:6px 0 8px}
+  .plz label{flex:1;font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:3px}
+  .plz input{padding:6px 8px;font-size:13px}
   .lic-box{margin-top:8px;padding:8px;border-radius:8px;background:var(--panel-2);border:1px solid var(--border);font-size:12px}
   .lic-box .l{display:flex;gap:6px;align-items:center;padding:3px 0}
   .lic-box .l span{flex:1}
@@ -872,7 +875,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
 <header>
   <h1>Planificador + Asignador</h1>
-  <span class="sub">v0.4.0</span> <span class="netflag off" id="netFlag">conectando…</span>
+  <span class="sub">v0.5.0</span> <span class="netflag off" id="netFlag">conectando…</span>
   <div class="modo-switch" id="tabs">
     <button data-tab="plani" class="on">Planificador</button>
     <button data-tab="asig">Asignador</button>
@@ -912,6 +915,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
           <li>En <b>Asignador</b> elegís un inspector, la comuna y la cantidad: la app toma los puntos más cercanos entre sí (y a los que el inspector ya tiene).</li>
           <li>Los inspectores en <b>licencia</b> quedan bloqueados y se liberan solos al cumplirse la fecha.</li>
         </ol>
+        <div style="text-align:right;margin-top:14px"><button class="btn primary" data-act="emptyOk">Aceptar</button></div>
       </div>
     </div>
     <div id="pcard" hidden></div>
@@ -1032,10 +1036,10 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
     puntos: [], inspectores: [], log: [],
     me: null, tab: "plani", sub: "resumen", ready: { p:false, i:false },
     layers: { comunas:true, etiquetas:true, puntos:true }, show: "todos", soloSel: false,
-    form: { inspId:null, rows:[{ comuna:"", n:"" }] }, preview: { rows:[], ids:[] },
+    form: { inspId:null, rows:[{ comuna:"", n:"" }], plazo:"" }, preview: { rows:[], ids:[] },
     focus: null, selPoint: null, undo: null, licOpen: {}, newInsp: { nombre:"", comunas:[] },
     filtroInsp: "todos", busqInsp: "", pFiltro: { q:"", est:"todos", comuna:"" }, confirmKey: null,
-    dayStamp: "", online: true
+    dayStamp: "", online: true, emptyOk: lsGet("pa_emptyOk") === "1"
   };
   var map, comunaLG, labelLG, markersLG, previewLG, markerById = {}, idx = new Map();
   var COM = [], comunaLayer = {};
@@ -1272,6 +1276,20 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
     p.dir = String(pickKey(n, DIR_KEYS) || "");
     if(p.lat != null){ p.x = mx(p.lon); p.y = my(p.lat); }
   }
+  // "25/10/2026" o "2026-10-25" -> "2026-10-25" (o null)
+  function parsePlazo(v){
+    var t = String(v == null ? "" : v).trim(), m;
+    if(m = t.match(/^(\d{4})-(\d{2})-(\d{2})/)) return m[1] + "-" + m[2] + "-" + m[3];
+    if(m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)) return m[3] + "-" + pad(m[2]) + "-" + pad(m[1]);
+    return null;
+  }
+  function plazoInfo(iso){
+    if(!iso) return null;
+    var a = new Date(iso + "T00:00:00"), b = new Date(isoToday() + "T00:00:00");
+    var dias = Math.round((a - b) / 86400000);
+    var txt = dias > 1 ? "vence en " + dias + " días" : dias === 1 ? "vence mañana" : dias === 0 ? "vence hoy" : dias === -1 ? "venció ayer" : "venció hace " + (-dias) + " días";
+    return { dias:dias, txt:txt, cls: dias < 0 ? "bad" : (dias <= 1 ? "warn" : "ok") };
+  }
   function puntoId(p){
     var a = norm(p.aviso || "").slice(0, 24);
     return "p_" + (a ? a + "_" : "") + cyrb53(puntoKey(p)).toString(36);
@@ -1286,7 +1304,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       var nmap = {}; Object.keys(f.datos).forEach(function(k){ nmap[norm(k)] = f.datos[k]; });
       var g = f.geo || coordsOf(nmap);
       var p = { id:"", src:fname, cargadoEn:stamp, headers:headers, datos:f.datos,
-                lat: g ? g.lat : null, lon: g ? g.lon : null, comuna:null, insp:null, asigEn:null, asigPor:null };
+                lat: g ? g.lat : null, lon: g ? g.lon : null, comuna:null, insp:null, asigEn:null, asigPor:null, plazo:null };
       prepPunto(p);
       if(!g && !p.dir && !p.aviso){ res.empty++; return; }   // fila vacía / con datos sueltos de otras columnas
       p.id = puntoId(p);
@@ -1296,7 +1314,10 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       var pre = String(nmap["INSPECTORASIGNADO"] || "").trim();
       if(pre){
         var ins = inspByKey[nameKey(pre)];
-        if(ins){ p.insp = ins.id; p.asigEn = stamp; p.asigPor = "(archivo)"; res.pre++; } else res.preMiss++;
+        if(ins){
+          p.insp = ins.id; p.asigEn = stamp; p.asigPor = "(archivo)"; res.pre++;
+          p.plazo = parsePlazo(nmap["PLAZOASIGNADO"]);
+        } else res.preMiss++;
       }
       res.nuevos.push(p); res.added++;
     });
@@ -1438,6 +1459,8 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       if(!p.insp) return;
       var a = A[p.insp] || (A[p.insp] = { total:0, porC:{} });
       a.total++; var c = p.comuna || 0; a.porC[c] = (a.porC[c]||0) + 1;
+      if(p.plazo && (!a.plazoMin || p.plazo < a.plazoMin)) a.plazoMin = p.plazo;
+      if(!p.plazo) a.sinPlazo = (a.sinPlazo || 0) + 1;
     });
     return A;
   }
@@ -1527,7 +1550,8 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
     if(!tot) h = '<span class="note">Elegí la comuna y la cantidad para ver la vista previa en el mapa (anillos naranja).</span>';
     else{
       h = '<b>Se asignarán ' + tot + ' puntos</b> (' + msgs.join(" + ") + ')' +
-          (prev ? ' pegados a los ' + prev + ' que ya tiene.' : ' en la zona más compacta de la comuna.');
+          (prev ? ' pegados a los ' + prev + ' que ya tiene.' : ' en la zona más compacta de la comuna.') +
+          (state.form.plazo ? ' Plazo: <b>' + fmtISO(state.form.plazo) + '</b>.' : ' <span class="badge warn">sin plazo</span>');
       if(short) h += '<br><span class="badge warn">hay menos pendientes que los pedidos</span>';
     }
     el.innerHTML = h;
@@ -1547,9 +1571,11 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
     var ins = inspById(state.form.inspId); if(!ins) return;
     if(estadoInsp(ins).k === "licencia"){ toast(ins.nombre + " está de licencia: no se le puede asignar."); return; }
     var pv = computePreview(); if(!pv.ids.length) return;
+    var plazo = state.form.plazo || "";
+    if(plazo && plazo < isoToday()){ toast("El plazo no puede ser anterior a hoy."); return; }
     var btn = document.getElementById("btnAsignar"); if(btn){ btn.disabled = true; btn.textContent = "Asignando…"; }
-    BE.assign(pv.ids, ins.id, state.me.nombre).then(function(){
-      pv.rows.forEach(function(r){ if(r.got) addLog("Asignar", ins.nombre, "C" + r.comuna, r.got, r.got < r.req ? "pedidos " + r.req : ""); });
+    BE.assign(pv.ids, ins.id, state.me.nombre, plazo).then(function(){
+      pv.rows.forEach(function(r){ if(r.got) addLog("Asignar", ins.nombre, "C" + r.comuna, r.got, (r.got < r.req ? "pedidos " + r.req + " · " : "") + (plazo ? "plazo " + fmtISO(plazo) : "sin plazo")); });
       state.undo = { ids:pv.ids.slice(), inspId:ins.id };
       state.form.rows = [{ comuna:"", n:"" }]; state.preview = { rows:[], ids:[] };
       drawPreview(); scheduleRender();
@@ -1602,7 +1628,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       datos[k] = (v === undefined || v === null || (typeof v === "number" && !isFinite(v))) ? "" : (typeof v === "object" ? String(v) : v);
     });
     return { src:p.src, cargadoEn:p.cargadoEn, cargadoPor: state.me ? state.me.uid : "", headers:headers, datos:datos,
-      lat:p.lat, lon:p.lon, comuna:p.comuna, insp:p.insp || null, asigEn:p.asigEn || null, asigPor:p.asigPor || null };
+      lat:p.lat, lon:p.lon, comuna:p.comuna, insp:p.insp || null, asigEn:p.asigEn || null, asigPor:p.asigPor || null, plazo:p.plazo || null };
   }
 
   function makeFirebaseBE(){
@@ -1662,7 +1688,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
         }
       },
       // asigna solo si TODOS siguen pendientes (si otra persona ya tomó alguno, avisa: code "conflict")
-      assign: async function(ids, inspId, who){
+      assign: async function(ids, inspId, who, plazo){
         var when = new Date().toISOString(), groups = chunk(ids, 400);
         for(var g=0; g<groups.length; g++){
           var grp = groups[g];
@@ -1675,11 +1701,11 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
               else { var cur = s.data().insp; if(cur && cur !== inspId) bad.push(grp[i]); }
             });
             if(bad.length){ var e = new Error("conflict"); e.code = "conflict"; e.ids = bad; throw e; }
-            refs.forEach(function(r){ tx.update(r, { insp:inspId, asigEn:when, asigPor:who }); });
+            refs.forEach(function(r){ tx.update(r, { insp:inspId, asigEn:when, asigPor:who, plazo:plazo || null }); });
           });
         }
       },
-      unassign: function(ids){ return updChunks(ids, { insp:null, asigEn:null, asigPor:null }); },
+      unassign: function(ids){ return updChunks(ids, { insp:null, asigEn:null, asigPor:null, plazo:null }); },
       saveInspectores: async function(list){
         var groups = chunk(list, 400);
         for(var g=0; g<groups.length; g++){
@@ -1753,16 +1779,16 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       removePuntos: function(ids){
         var ch = []; ids.forEach(function(id){ if(P.delete(id)) ch.push({ type:"removed", id:id }); }); emitP(ch); return Promise.resolve();
       },
-      assign: function(ids, inspId, who){
+      assign: function(ids, inspId, who, plazo){
         var bad = ids.filter(function(id){ var d = P.get(id); return !d || (d.insp && d.insp !== inspId); });
         if(bad.length){ var e = err("conflict"); e.ids = bad; return Promise.reject(e); }
         var when = new Date().toISOString(), ch = [];
-        ids.forEach(function(id){ var d = P.get(id); d.insp = inspId; d.asigEn = when; d.asigPor = who; ch.push({ type:"modified", id:id, data:clone(d) }); });
+        ids.forEach(function(id){ var d = P.get(id); d.insp = inspId; d.asigEn = when; d.asigPor = who; d.plazo = plazo || null; ch.push({ type:"modified", id:id, data:clone(d) }); });
         emitP(ch); return Promise.resolve();
       },
       unassign: function(ids){
         var ch = [];
-        ids.forEach(function(id){ var d = P.get(id); if(d){ d.insp = null; d.asigEn = null; d.asigPor = null; ch.push({ type:"modified", id:id, data:clone(d) }); } });
+        ids.forEach(function(id){ var d = P.get(id); if(d){ d.insp = null; d.asigEn = null; d.asigPor = null; d.plazo = null; ch.push({ type:"modified", id:id, data:clone(d) }); } });
         emitP(ch); return Promise.resolve();
       },
       saveInspectores: function(list){
@@ -1795,12 +1821,12 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       if(ch.type === "removed"){ if(ex) rem.push(ch.id); return; }
       var v = ch.data || {};
       if(ex){
-        ex.insp = v.insp || null; ex.asigEn = v.asigEn || null; ex.asigPor = v.asigPor || null;
+        ex.insp = v.insp || null; ex.asigEn = v.asigEn || null; ex.asigPor = v.asigPor || null; ex.plazo = v.plazo || null;
         refreshMarker(ex); return;
       }
       var p = { id:ch.id, src:v.src || "(sin nombre)", cargadoEn:v.cargadoEn || "", headers:v.headers || Object.keys(v.datos || {}), datos:v.datos || {},
                 lat:(v.lat == null ? null : v.lat), lon:(v.lon == null ? null : v.lon), comuna:(v.comuna == null ? null : v.comuna),
-                insp:v.insp || null, asigEn:v.asigEn || null, asigPor:v.asigPor || null };
+                insp:v.insp || null, asigEn:v.asigEn || null, asigPor:v.asigPor || null, plazo:v.plazo || null };
       prepPunto(p); idx.set(p.id, p); state.puntos.push(p);
       if(p.lat != null) addMarker(p);
     });
@@ -2092,7 +2118,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       var ins = p.insp ? inspById(p.insp) : null;
       h += '<div class="item' + (state.selPoint === p.id ? " sel" : "") + '" data-act="ptSel" data-id="' + p.id + '">' +
         '<span class="dot" style="background:' + (p.insp ? (ins ? ins.color : "#9e9e9e") : "#fff") + '"></span><div><div class="dir">' + esc(p.dir || "(sin dirección)") + '</div>' +
-        '<div class="meta">' + (p.aviso ? esc(p.aviso) + " · " : "") + (p.lat == null ? "sin ubicación" : (p.comuna ? "C" + p.comuna : "fuera de comunas")) + " · " + (ins ? esc(ins.nombre) : "pendiente") + '</div></div></div>';
+        '<div class="meta">' + (p.aviso ? esc(p.aviso) + " · " : "") + (p.lat == null ? "sin ubicación" : (p.comuna ? "C" + p.comuna : "fuera de comunas")) + " · " + (ins ? esc(ins.nombre) + (p.plazo ? " · plazo " + fmtISO(p.plazo) : "") : "pendiente") + '</div></div></div>';
     });
     if(!list.length) h += '<p class="note">No hay puntos con ese filtro.</p>';
     return h;
@@ -2165,6 +2191,11 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       h += ' <span class="chip x" data-act="unAsk" data-id="' + i.id + '" data-c="' + c + '" title="Liberar estos puntos">' + (+c ? "C" + c : "s/c") + ': ' + a.porC[c] + ' ✕</span>';
     });
     h += '</div>';
+    if(a.total){
+      var pi = plazoInfo(a.plazoMin);
+      h += '<div class="row">Plazo: ' + (pi ? '<span class="badge ' + pi.cls + '">' + fmtISO(a.plazoMin) + ' · ' + pi.txt + '</span>' : '<i>sin plazo</i>') +
+           (a.sinPlazo && pi ? ' <span class="note">(' + a.sinPlazo + ' sin plazo)</span>' : '') + '</div>';
+    }
     if(lic && a.total) h += '<div class="row"><span class="badge warn">⚠ está de licencia y tiene ' + a.total + ' puntos asignados</span> <button class="btn sm" data-act="unAsk" data-id="' + i.id + '" data-c="">Liberar todos</button></div>';
     if(state.confirmKey && state.confirmKey.indexOf("u:" + i.id + ":") === 0){
       var cc = state.confirmKey.split(":")[2];
@@ -2197,6 +2228,8 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
         '<button class="btn sm" data-act="todas" data-k="' + k + '" title="Todos los pendientes de la comuna">Todas</button>' +
         (state.form.rows.length > 1 ? '<button class="btn sm" data-act="rmRow" data-k="' + k + '">✕</button>' : "") + '</div>';
     });
+    h += '<div class="plz"><label>Plazo (fecha límite para hacerlos)<input type="date" data-in="fplazo" min="' + isoToday() + '" value="' + esc(state.form.plazo || "") + '"></label>' +
+      '<button class="btn sm" data-act="plzClear" title="Quitar el plazo">Sin plazo</button></div>';
     h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 8px">' +
       (state.form.rows.length < MAXFORM ? '<button class="btn sm" data-act="addRowBtn">+ Otra comuna</button>' : "") +
       '<button class="btn sm" data-act="clearForm">Limpiar</button>' +
@@ -2246,6 +2279,10 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
     h += '<div style="margin-bottom:6px">' + (ins ? '<span class="badge ok">Asignado a ' + esc(ins.nombre) + '</span>' : '<span class="badge warn">Pendiente</span>') + '</div>';
     h += '<div class="kv"><div class="k">Comuna</div><div class="v">' + (p.comuna ? "C" + p.comuna + (cm ? " · " + esc(cm.barrios) : "") : "fuera de comunas") + '</div></div>';
     if(ins && p.asigEn) h += '<div class="kv"><div class="k">Asignado</div><div class="v">' + fmtDT(p.asigEn) + ' · ' + esc(p.asigPor || "") + '</div></div>';
+    if(ins){
+      var pzi = plazoInfo(p.plazo);
+      h += '<div class="kv"><div class="k">Plazo</div><div class="v">' + (pzi ? fmtISO(p.plazo) + ' <span class="badge ' + pzi.cls + '">' + pzi.txt + '</span>' : "sin plazo") + '</div></div>';
+    }
     var shown = 0;
     (p.headers || []).forEach(function(k){
       var v = p.datos[k]; if(v === "" || v == null || shown >= 14) return;
@@ -2261,7 +2298,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
   }
   function renderAll(){
     renderHeader(); renderLbox(); renderLeft(); renderRight(); renderCard();
-    document.getElementById("empty").hidden = !state.ready.p || state.puntos.some(function(p){ return p.lat != null; });
+    document.getElementById("empty").hidden = state.emptyOk || !state.ready.p || state.puntos.some(function(p){ return p.lat != null; });
     setTimeout(function(){ map.invalidateSize(); }, 50);
   }
 
@@ -2280,6 +2317,9 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       o["INSPECTOR ASIGNADO"] = ins ? ins.nombre : "";
       o["ASIGNADO EL"] = p.asigEn ? fmtDT(p.asigEn) : "";
       o["ASIGNADO POR"] = p.asigPor || "";
+      o["PLAZO ASIGNADO"] = p.plazo ? fmtISO(p.plazo) : "";
+      var pzx = plazoInfo(p.plazo);
+      o["ESTADO DEL PLAZO"] = !p.insp ? "" : (pzx ? (pzx.dias < 0 ? "Vencido hace " + (-pzx.dias) + " días" : pzx.txt.replace("vence", "Vence")) : "Sin plazo");
       o["LAT"] = p.lat != null ? +p.lat.toFixed(6) : ""; o["LON"] = p.lon != null ? +p.lon.toFixed(6) : "";
       o["ARCHIVO"] = p.src;
       return o;
@@ -2662,8 +2702,10 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
         if(!p || !si) break;
         if(estadoInsp(si).k === "licencia"){ toast("Está de licencia."); break; }
         state.undo = null;
-        BE.assign([id], si.id, state.me.nombre).then(function(){
-          addLog("Asignar (punto suelto)", si.nombre, p.comuna ? "C" + p.comuna : "", 1, p.dir);
+        var pz = state.form.plazo || "";
+        if(pz && pz < isoToday()){ toast("El plazo no puede ser anterior a hoy."); break; }
+        BE.assign([id], si.id, state.me.nombre, pz).then(function(){
+          addLog("Asignar (punto suelto)", si.nombre, p.comuna ? "C" + p.comuna : "", 1, p.dir + (pz ? " · plazo " + fmtISO(pz) : ""));
           scheduleRender();
         }).catch(errAsignar);
         break; }
@@ -2693,6 +2735,8 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       case "dlInspKml": dlInspKml(id); break;
       case "dlInspXlsx": dlInspXlsx(id); break;
       case "cpSave": guardarClaveUI(el.getAttribute("data-rol")); break;
+      case "emptyOk": state.emptyOk = true; lsSet("pa_emptyOk", "1"); document.getElementById("empty").hidden = true; break;
+      case "plzClear": state.form.plazo = ""; renderRight(); schedulePreview(); break;
     }
   }
   function addFormRow(c){
@@ -2711,6 +2755,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       case "show": state.show = el.value; applyVisibility(); break;
       case "soloSel": state.soloSel = el.checked; applyVisibility(); break;
       case "fcom": state.form.rows[+el.getAttribute("data-k")].comuna = el.value; renderRight(); schedulePreview(); break;
+      case "fplazo": state.form.plazo = el.value; schedulePreview(); break;
       case "fn": state.form.rows[+el.getAttribute("data-k")].n = el.value; schedulePreview(); break;
       case "niNombre": state.newInsp.nombre = el.value; break;
       case "busqInsp": state.busqInsp = el.value; renderRight(); break;
