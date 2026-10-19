@@ -772,6 +772,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .lbox{position:absolute;top:10px;right:10px;z-index:800;background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);padding:8px 11px;font-size:12px;display:flex;flex-direction:column;gap:5px}
   .lbox label{display:flex;align-items:center;gap:6px;cursor:pointer}
   .lbox select{padding:3px 6px;font-size:12px}
+  .lbox .lbh{display:flex;align-items:center;justify-content:space-between;gap:14px;font-weight:700;font-size:12px;cursor:pointer;user-select:none}
+  .lbox .lbar{color:var(--muted);font-size:13px}
+  .lbox.closed{padding:6px 11px;gap:0}
   .lbox hr{border:0;border-top:1px solid var(--border);margin:2px 0;width:100%}
   .clabel{background:rgba(255,255,255,.85);color:#222;border:1px solid rgba(0,0,0,.35);border-radius:6px;padding:0 5px;font-weight:800;font-size:11px;white-space:nowrap;pointer-events:none;width:auto !important;height:auto !important;line-height:16px}
   .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;pointer-events:none;z-index:700}
@@ -875,7 +878,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
 <header>
   <h1>Planificador + Asignador</h1>
-  <span class="sub">v0.5.0</span> <span class="netflag off" id="netFlag">conectando…</span>
+  <span class="sub">v0.6.0</span> <span class="netflag off" id="netFlag">conectando…</span>
   <div class="modo-switch" id="tabs">
     <button data-tab="plani" class="on">Planificador</button>
     <button data-tab="asig">Asignador</button>
@@ -907,16 +910,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     <div id="map"></div>
     <div class="lbox" id="lbox"></div>
     <div class="empty" id="empty" hidden>
-      <div class="card">
-        <h3>Todavía no hay puntos cargados</h3>
-        <p style="margin:0;color:var(--muted);font-size:13px">El planificador carga arriba <b>Cargar puntos</b> (.xlsx, .csv o .kml) y <b>Cargar inspectores</b> (la nómina). Quedan guardados en la nube para todos.</p>
-        <ol>
-          <li>Cada punto se ubica en el mapa y se le calcula su <b>comuna</b> automáticamente.</li>
-          <li>En <b>Asignador</b> elegís un inspector, la comuna y la cantidad: la app toma los puntos más cercanos entre sí (y a los que el inspector ya tiene).</li>
-          <li>Los inspectores en <b>licencia</b> quedan bloqueados y se liberan solos al cumplirse la fecha.</li>
-        </ol>
-        <div style="text-align:right;margin-top:14px"><button class="btn primary" data-act="emptyOk">Aceptar</button></div>
-      </div>
+      <div class="card" id="emptyCard"></div>
     </div>
     <div id="pcard" hidden></div>
   </main>
@@ -1039,7 +1033,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
     form: { inspId:null, rows:[{ comuna:"", n:"" }], plazo:"" }, preview: { rows:[], ids:[] },
     focus: null, selPoint: null, undo: null, licOpen: {}, newInsp: { nombre:"", comunas:[] },
     filtroInsp: "todos", busqInsp: "", pFiltro: { q:"", est:"todos", comuna:"" }, confirmKey: null,
-    dayStamp: "", online: true, emptyOk: lsGet("pa_emptyOk") === "1"
+    dayStamp: "", online: true, guideOk: { plani:false, asig:false }, lboxOpen: lsGet("pa_lbox") !== "0"
   };
   var map, comunaLG, labelLG, markersLG, previewLG, markerById = {}, idx = new Map();
   var COM = [], comunaLayer = {};
@@ -2051,14 +2045,17 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
   }
   function renderLbox(){
     var el = document.getElementById("lbox");
-    var asig = state.tab === "asig";
+    var asig = state.tab === "asig", open = state.lboxOpen;
+    el.className = "lbox" + (open ? "" : " closed");
     el.innerHTML =
+      '<div class="lbh" data-act="lboxToggle" title="' + (open ? "Ocultar" : "Mostrar") + ' las capas"><span>Capas y vista</span><span class="lbar">' + (open ? "▾" : "▸") + '</span></div>' +
+      (open ?
       '<label><input type="checkbox" data-in="lyr" data-k="comunas"' + (state.layers.comunas ? " checked" : "") + '> Comunas</label>' +
       '<label><input type="checkbox" data-in="lyr" data-k="etiquetas"' + (state.layers.etiquetas ? " checked" : "") + '> Etiquetas</label>' +
       '<label><input type="checkbox" data-in="lyr" data-k="puntos"' + (state.layers.puntos ? " checked" : "") + '> Puntos</label><hr>' +
       '<label>Ver <select data-in="show"><option value="todos"' + (state.show==="todos"?" selected":"") + '>Todos</option><option value="pend"' + (state.show==="pend"?" selected":"") + '>Solo pendientes</option><option value="asig"' + (state.show==="asig"?" selected":"") + '>Solo asignados</option></select></label>' +
       (asig ? '<label><input type="checkbox" data-in="soloSel"' + (state.soloSel ? " checked" : "") + '> Solo del inspector elegido</label>' : "") +
-      '<hr><div class="legend-row"><i style="background:#fff"></i> pendiente</div><div class="legend-row"><i style="background:#9e9e9e"></i> asignado (color del inspector)</div>';
+      '<hr><div class="legend-row"><i style="background:#fff"></i> pendiente</div><div class="legend-row"><i style="background:#9e9e9e"></i> asignado (color del inspector)</div>' : "");
   }
 
   function renderLeft(){
@@ -2296,9 +2293,34 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
     h += '</div>';
     el.innerHTML = h; el.hidden = false;
   }
+  // cartel de ayuda: aparece en cada ingreso (una vez por pestaña) hasta tocar "Aceptar"
+  function renderGuide(){
+    var wrap = document.getElementById("empty"), card = document.getElementById("emptyCard");
+    if(!state.me || state.guideOk[state.tab] || !(state.ready.p && state.ready.i)){ wrap.hidden = true; return; }
+    var S = stats(), plani = state.tab === "plani", sinPuntos = S.enMapa === 0, opers = 0;
+    state.inspectores.forEach(function(i){ if(estadoInsp(i).k !== "licencia") opers++; });
+    var estado = sinPuntos
+      ? '<b>Todavía no hay puntos cargados.</b>' + (plani ? "" : " Avisale al planificador para que los cargue.")
+      : 'Hay <b>' + S.enMapa + '</b> puntos en el mapa (<b>' + S.pend + '</b> pendientes de asignar, <b>' + S.asig + '</b> asignados) y <b>' + state.inspectores.length + '</b> inspectores (' + opers + ' operativos).';
+    var h = '<h3>' + (plani ? "Pestaña Planificador" : "Pestaña Asignador") + '</h3>' +
+      '<p style="margin:0 0 6px;color:var(--muted);font-size:13px">' + estado + '</p><ol>';
+    if(plani){
+      h += '<li>Cargá los <b>inspectores</b> (nómina) y los <b>puntos</b> (.xlsx, .csv o .kml) con los botones de arriba. Cada punto se ubica en el mapa y recibe su <b>comuna</b>.</li>' +
+           '<li>En <b>Inspectores</b> marcá las comunas de preferencia de cada uno. Los que estén de <b>licencia</b> quedan bloqueados y se liberan solos al cumplirse la fecha.</li>' +
+           '<li>En la pestaña <b>Asignador</b> se reparten los puntos. Acá ves el avance por comuna en <b>Resumen</b>.</li>' +
+           '<li>Cuando no quede nada pendiente, en <b>Resumen → Entrega por inspector</b> descargás un KML y un Excel por inspector (o el ZIP con todos).</li>';
+    } else {
+      h += '<li>Elegí un <b>inspector</b> en la lista de la derecha (los que están de licencia aparecen bloqueados).</li>' +
+           '<li>Elegí la <b>comuna</b> (hasta 3 a la vez) y la <b>cantidad</b>. En el mapa ves con anillos naranja qué puntos se llevaría: los más cercanos entre sí y a los que ya tiene.</li>' +
+           '<li>Indicá el <b>plazo</b> (fecha límite, opcional) y tocá <b>Asignar</b>. Si te equivocás, usá <b>Deshacer última</b> o liberá los puntos del inspector.</li>' +
+           '<li>Con <b>Descargar → Excel completo</b> bajás todo el detalle.</li>';
+    }
+    h += '</ol><div style="text-align:right;margin-top:14px"><button class="btn primary" data-act="guideOk">Aceptar</button></div>';
+    card.innerHTML = h; wrap.hidden = false;
+  }
   function renderAll(){
     renderHeader(); renderLbox(); renderLeft(); renderRight(); renderCard();
-    document.getElementById("empty").hidden = state.emptyOk || !state.ready.p || state.puntos.some(function(p){ return p.lat != null; });
+    renderGuide();
     setTimeout(function(){ map.invalidateSize(); }, 50);
   }
 
@@ -2470,9 +2492,11 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
         '<div class="btns"><button class="btn sm" data-act="dl" data-w="insp">Sus asignaciones (Excel)</button><button class="btn sm" data-act="dl" data-w="insp-kml">Su KML</button><button class="btn sm" data-act="dl" data-w="zip">ZIP de todos</button></div></div>' +
       '<div class="grp"><div class="lbl">Resúmenes</div><div class="btns"><button class="btn sm" data-act="dl" data-w="resumen">Cuadro por comuna</button><button class="btn sm" data-act="dl" data-w="inspectores">Inspectores</button><button class="btn sm" data-act="dl" data-w="cambios">Cambios</button></div></div>';
     el.innerHTML = h;
+    if(state.me && state.me.rol === "asignador"){ el.querySelectorAll(".grp").forEach(function(g, k){ if(k > 0) g.remove(); }); }
   }
   function doDownload(w){
     var P = state.puntos;
+    if(state.me && state.me.rol === "asignador" && w !== "todo") return;
     if(w === "todo") dlSheets([{ name:"Puntos", objs:puntosObjs(P) },{ name:"Resumen por comuna", objs:resumenObjs() },{ name:"Inspectores", objs:inspObjs() },{ name:"Cambios", objs:logObjs() }], "Planificacion_completa");
     else if(w === "puntos-xlsx") dlSheets([{ name:"Puntos", objs:puntosObjs(P) }], "Puntos");
     else if(w === "puntos-csv") dlCSV(puntosObjs(P), "Puntos");
@@ -2567,6 +2591,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
   }
   function enter(){
     state.tab = state.me.rol === "planificador" ? "plani" : "asig";
+    state.guideOk = { plani:false, asig:false };
     document.getElementById("login").hidden = true;
     startData(); renderAll();
   }
@@ -2735,7 +2760,8 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       case "dlInspKml": dlInspKml(id); break;
       case "dlInspXlsx": dlInspXlsx(id); break;
       case "cpSave": guardarClaveUI(el.getAttribute("data-rol")); break;
-      case "emptyOk": state.emptyOk = true; lsSet("pa_emptyOk", "1"); document.getElementById("empty").hidden = true; break;
+      case "guideOk": state.guideOk[state.tab] = true; document.getElementById("empty").hidden = true; break;
+      case "lboxToggle": state.lboxOpen = !state.lboxOpen; lsSet("pa_lbox", state.lboxOpen ? "1" : "0"); renderLbox(); break;
       case "plzClear": state.form.plazo = ""; renderRight(); schedulePreview(); break;
     }
   }
