@@ -884,7 +884,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
 <header>
   <h1>Planificador + Asignador</h1>
-  <span class="sub">v0.7.0</span> <span class="netflag off" id="netFlag">conectando…</span>
+  <span class="sub">v0.7.1</span> <span class="netflag off" id="netFlag">conectando…</span>
   <div class="modo-switch" id="tabs">
     <button data-tab="plani" class="on">Planificador</button>
     <button data-tab="asig">Asignador</button>
@@ -2336,6 +2336,8 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
   }
   function stamp(){ return new Date().toISOString().slice(0,16).replace("T","_").replace(/:/g,""); }
+  // nombre del inspector para las descargas: sin coma ("ZAMUDIO, PABLO" -> "ZAMUDIO PABLO")
+  function nomSinComa(n){ return String(n == null ? "" : n).replace(/,/g, " ").replace(/\s+/g, " ").trim(); }
   // Filas para Excel/KML. Respeta las columnas del archivo original y COMPLETA las columnas INSPECTOR y PLAZO
   // (si el archivo no las trae, las agrega). soloOriginal=true: entrega por inspector, sin columnas de control.
   function puntosObjs(list, soloOriginal){
@@ -2347,12 +2349,12 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       var kP = hs.filter(function(h){ return norm(h) === "PLAZO"; })[0] || "PLAZO";
       if(!(kI in o)) o[kI] = "";
       if(!(kP in o)) o[kP] = "";
-      if(ins) o[kI] = ins.nombre;                         // asignado: se completa con el inspector
+      if(ins) o[kI] = nomSinComa(ins.nombre);                         // asignado: se completa con el inspector
       if(ins && p.plazo) o[kP] = fmtISO(p.plazo);         // y con el plazo (dd/mm/aaaa); si no, queda lo que traía el archivo
       if(soloOriginal) return o;
       o["COMUNA (calculada)"] = p.comuna ? "C" + p.comuna : (p.lat == null ? "sin ubicación" : "fuera de comunas");
       o["BARRIOS DE LA COMUNA"] = cm ? cm.barrios : "";
-      o["INSPECTOR ASIGNADO"] = ins ? ins.nombre : "";
+      o["INSPECTOR ASIGNADO"] = ins ? nomSinComa(ins.nombre) : "";
       o["ASIGNADO EL"] = p.asigEn ? fmtDT(p.asigEn) : "";
       o["ASIGNADO POR"] = p.asigPor || "";
       o["PLAZO ASIGNADO"] = p.plazo ? fmtISO(p.plazo) : "";
@@ -2375,7 +2377,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
     var A = asigIndex();
     return state.inspectores.map(function(i){
       var e = estadoInsp(i), a = A[i.id] || { total:0, porC:{} };
-      return { "INSPECTOR": i.nombre, "MAIL": i.mail || "", "ESTADO HOY": e.k === "licencia" ? "Licencia hasta " + fmtISO(e.lic.hasta) : "Operativo",
+      return { "INSPECTOR": nomSinComa(i.nombre), "MAIL": i.mail || "", "ESTADO HOY": e.k === "licencia" ? "Licencia hasta " + fmtISO(e.lic.hasta) : "Operativo",
         "COMUNAS DE PREFERENCIA": i.comunas.map(function(c){ return "C" + c; }).join(", "),
         "ASIGNADOS": a.total, "ASIGNADOS POR COMUNA": Object.keys(a.porC).sort(function(x,y){ return x-y; }).map(function(c){ return (+c ? "C" + c : "s/c") + ": " + a.porC[c]; }).join(" · "),
         "LICENCIAS": (i.licencias || []).map(function(l){ return fmtISO(l.desde) + " a " + fmtISO(l.hasta) + (l.motivo ? " (" + l.motivo + ")" : ""); }).join(" ; ") };
@@ -2407,7 +2409,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
   function kmlFor(ins, list){
     var objs = puntosObjs(list, true), cols = objs.length ? Object.keys(objs[0]) : [];
     var sid = "schema_" + slug(ins.nombre);
-    var schema = '<Schema name="' + escXml(ins.nombre) + '" id="' + escXml(sid) + '">' + cols.map(function(c){
+    var schema = '<Schema name="' + escXml(nomSinComa(ins.nombre)) + '" id="' + escXml(sid) + '">' + cols.map(function(c){
       return '<SimpleField type="string" name="' + escXml(c) + '"><displayName>' + escXml(c) + '</displayName></SimpleField>';
     }).join("") + '</Schema>';
     var pms = list.map(function(p, i){
@@ -2417,7 +2419,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       return '<Placemark><name>' + escXml(p.dir || p.aviso || "") + '</name><ExtendedData><SchemaData schemaUrl="#' + escXml(sid) + '">' + sd +
              '</SchemaData></ExtendedData><Point><coordinates>' + p.lon + ',' + p.lat + ',0</coordinates></Point></Placemark>';
     }).filter(Boolean).join("\n");
-    return '<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>' + escXml(ins.nombre) + '</name>' + schema + pms + '</Document></kml>';
+    return '<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>' + escXml(nomSinComa(ins.nombre)) + '</name>' + schema + pms + '</Document></kml>';
   }
   function puntosDe(ins){ return state.puntos.filter(function(p){ return p.insp === ins.id; }); }
   function dlInspKml(id){
