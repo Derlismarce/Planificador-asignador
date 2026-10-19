@@ -884,7 +884,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
 <header>
   <h1>Planificador + Asignador</h1>
-  <span class="sub">v0.6.1</span> <span class="netflag off" id="netFlag">conectando…</span>
+  <span class="sub">v0.7.0</span> <span class="netflag off" id="netFlag">conectando…</span>
   <div class="modo-switch" id="tabs">
     <button data-tab="plani" class="on">Planificador</button>
     <button data-tab="asig">Asignador</button>
@@ -2336,10 +2336,20 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
   }
   function stamp(){ return new Date().toISOString().slice(0,16).replace("T","_").replace(/:/g,""); }
-  function puntosObjs(list){
+  // Filas para Excel/KML. Respeta las columnas del archivo original y COMPLETA las columnas INSPECTOR y PLAZO
+  // (si el archivo no las trae, las agrega). soloOriginal=true: entrega por inspector, sin columnas de control.
+  function puntosObjs(list, soloOriginal){
     return list.map(function(p){
       var o = {}, ins = p.insp ? inspById(p.insp) : null, cm = p.comuna ? comuna(p.comuna) : null;
-      (p.headers || []).forEach(function(h){ o[h] = p.datos[h]; });
+      var hs = p.headers || [];
+      hs.forEach(function(h){ o[h] = p.datos[h]; });
+      var kI = hs.filter(function(h){ return norm(h) === "INSPECTOR"; })[0] || "INSPECTOR";
+      var kP = hs.filter(function(h){ return norm(h) === "PLAZO"; })[0] || "PLAZO";
+      if(!(kI in o)) o[kI] = "";
+      if(!(kP in o)) o[kP] = "";
+      if(ins) o[kI] = ins.nombre;                         // asignado: se completa con el inspector
+      if(ins && p.plazo) o[kP] = fmtISO(p.plazo);         // y con el plazo (dd/mm/aaaa); si no, queda lo que traía el archivo
+      if(soloOriginal) return o;
       o["COMUNA (calculada)"] = p.comuna ? "C" + p.comuna : (p.lat == null ? "sin ubicación" : "fuera de comunas");
       o["BARRIOS DE LA COMUNA"] = cm ? cm.barrios : "";
       o["INSPECTOR ASIGNADO"] = ins ? ins.nombre : "";
@@ -2395,7 +2405,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
   // ----- KML por inspector (mismo formato que el Asignador de Comunas: Schema + SchemaData, lo lee Google My Maps) -----
   function escXml(s){ return String(s==null?"":s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   function kmlFor(ins, list){
-    var objs = puntosObjs(list), cols = objs.length ? Object.keys(objs[0]) : [];
+    var objs = puntosObjs(list, true), cols = objs.length ? Object.keys(objs[0]) : [];
     var sid = "schema_" + slug(ins.nombre);
     var schema = '<Schema name="' + escXml(ins.nombre) + '" id="' + escXml(sid) + '">' + cols.map(function(c){
       return '<SimpleField type="string" name="' + escXml(c) + '"><displayName>' + escXml(c) + '</displayName></SimpleField>';
@@ -2418,7 +2428,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
   function dlInspXlsx(id){
     var ins = inspById(id); if(!ins) return;
     var list = puntosDe(ins); if(!list.length){ toast(ins.nombre + " no tiene puntos asignados."); return; }
-    dlSheets([{ name:"Asignaciones", objs:puntosObjs(list) }], slug(ins.nombre));
+    dlSheets([{ name:"Asignaciones", objs:puntosObjs(list, true) }], slug(ins.nombre));
   }
   // ZIP sin compresión (alcanza para KML/Excel y evita depender de librerías externas)
   var CRC_T = null;
@@ -2459,7 +2469,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       var base = slug(ins.nombre), nm = base, n = 2;
       while(usados[nm]){ nm = base + "_" + (n++); } usados[nm] = 1;
       files.push({ name:"KML/" + nm + ".kml", data:enc.encode(kmlFor(ins, list)) });
-      var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(puntosObjs(list)), "Asignaciones");
+      var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(puntosObjs(list, true)), "Asignaciones");
       files.push({ name:"Excel/" + nm + ".xlsx", data:new Uint8Array(XLSX.write(wb, { bookType:"xlsx", type:"array" })) });
     });
     return files;
@@ -2511,7 +2521,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
     else if(w === "insp"){
       var id = document.getElementById("dlInsp").value, ins = inspById(id);
       if(!ins){ toast("Elegí un inspector."); return; }
-      dlSheets([{ name:"Asignaciones", objs:puntosObjs(P.filter(function(p){ return p.insp === id; })) }], "Asignaciones_" + slug(ins.nombre));
+      dlSheets([{ name:"Asignaciones", objs:puntosObjs(P.filter(function(p){ return p.insp === id; }), true) }], "Asignaciones_" + slug(ins.nombre));
     }
     else if(w === "insp-kml") dlInspKml(document.getElementById("dlInsp").value);
     else if(w === "zip") dlZipInspectores();
