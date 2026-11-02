@@ -811,6 +811,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .frow{display:flex;gap:6px;align-items:center;margin-bottom:6px}
   .frow select{flex:1;min-width:0}
   .frow input[type=number]{width:70px}
+  .plzrow{display:flex;gap:6px;margin:8px 0 2px}
+  .plzrow input{flex:1;min-width:0;padding:5px 7px;font-size:12px}
   .plz{display:flex;gap:8px;align-items:flex-end;margin:6px 0 8px}
   .plz label{flex:1;font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:3px}
   .plz input{padding:6px 8px;font-size:13px}
@@ -884,7 +886,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
 <header>
   <h1>Planificador + Asignador</h1>
-  <span class="sub">v0.7.1</span> <span class="netflag off" id="netFlag">conectando…</span>
+  <span class="sub">v0.8.0</span> <span class="netflag off" id="netFlag">conectando…</span>
   <div class="modo-switch" id="tabs">
     <button data-tab="plani" class="on">Planificador</button>
     <button data-tab="asig">Asignador</button>
@@ -1037,7 +1039,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
     me: null, tab: "plani", sub: "resumen", ready: { p:false, i:false },
     layers: { comunas:true, etiquetas:true, puntos:true }, show: "todos", soloSel: false,
     form: { inspId:null, rows:[{ comuna:"", n:"" }], plazo:"" }, preview: { rows:[], ids:[] },
-    focus: null, selPoint: null, undo: null, licOpen: {}, newInsp: { nombre:"", comunas:[] },
+    focus: null, selPoint: null, undo: null, licOpen: {}, plzOpen: {}, newInsp: { nombre:"", comunas:[] },
     filtroInsp: "todos", busqInsp: "", pFiltro: { q:"", est:"todos", comuna:"" }, confirmKey: null,
     dayStamp: "", online: true, guideOk: { plani:false, asig:false }, lboxOpen: lsGet("pa_lbox") !== "0"
   };
@@ -1706,6 +1708,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
         }
       },
       unassign: function(ids){ return updChunks(ids, { insp:null, asigEn:null, asigPor:null, plazo:null }); },
+      setPlazo: function(ids, plazo){ return updChunks(ids, { plazo:plazo || null }); },
       saveInspectores: async function(list){
         var groups = chunk(list, 400);
         for(var g=0; g<groups.length; g++){
@@ -1789,6 +1792,11 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       unassign: function(ids){
         var ch = [];
         ids.forEach(function(id){ var d = P.get(id); if(d){ d.insp = null; d.asigEn = null; d.asigPor = null; d.plazo = null; ch.push({ type:"modified", id:id, data:clone(d) }); } });
+        emitP(ch); return Promise.resolve();
+      },
+      setPlazo: function(ids, plazo){
+        var ch = [];
+        ids.forEach(function(id){ var d = P.get(id); if(d){ d.plazo = plazo || null; ch.push({ type:"modified", id:id, data:clone(d) }); } });
         emitP(ch); return Promise.resolve();
       },
       saveInspectores: function(list){
@@ -2198,6 +2206,8 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       var pi = plazoInfo(a.plazoMin);
       h += '<div class="row">Plazo: ' + (pi ? '<span class="badge ' + pi.cls + '">' + fmtISO(a.plazoMin) + ' · ' + pi.txt + '</span>' : '<i>sin plazo</i>') +
            (a.sinPlazo && pi ? ' <span class="note">(' + a.sinPlazo + ' sin plazo)</span>' : '') + '</div>';
+      h += '<div class="row"><button class="btn sm ghost" data-act="plzToggle" data-id="' + i.id + '">' + (state.plzOpen[i.id] ? "▾" : "▸") + ' Cambiar plazo</button></div>';
+      if(state.plzOpen[i.id]) h += plazoBox(i, a);
     }
     if(lic && a.total) h += '<div class="row"><span class="badge warn">⚠ está de licencia y tiene ' + a.total + ' puntos asignados</span> <button class="btn sm" data-act="unAsk" data-id="' + i.id + '" data-c="">Liberar todos</button></div>';
     if(state.confirmKey && state.confirmKey.indexOf("u:" + i.id + ":") === 0){
@@ -2214,6 +2224,40 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
     if(state.licOpen[i.id]) h += licBox(i);
     if(sel) h += assignForm(i, lic, S);
     return h + '</div>';
+  }
+  // cambia el plazo de puntos YA asignados, sin liberarlos
+  function plazoBox(i, a){
+    var sin = a.sinPlazo || 0, opts = '';
+    opts += '<option value="sin"' + (sin ? " selected" : "") + '>Solo los que no tienen plazo (' + sin + ')</option>';
+    opts += '<option value="todos"' + (sin ? "" : " selected") + '>Todos sus puntos (' + a.total + ')</option>';
+    Object.keys(a.porC).sort(function(x, y){ return x - y; }).forEach(function(c){
+      opts += '<option value="c:' + c + '">Solo ' + (+c ? "comuna " + c : "sin comuna") + ' (' + a.porC[c] + ')</option>';
+    });
+    return '<div class="lic-box"><b>Cambiar plazo de ' + esc(i.nombre) + '</b>' +
+      '<div class="grid"><label>Nueva fecha<input type="date" id="pz-d-' + i.id + '" min="' + isoToday() + '"></label>' +
+      '<label>Aplicar a<select id="pz-s-' + i.id + '">' + opts + '</select></label></div>' +
+      '<button class="btn sm primary" data-act="plzApply" data-id="' + i.id + '">Aplicar plazo</button> ' +
+      '<button class="btn sm" data-act="plzQuit" data-id="' + i.id + '">Quitar plazo</button>' +
+      '<div class="note" style="margin-top:6px">Los puntos siguen asignados al mismo inspector: solo cambia la fecha.</div></div>';
+  }
+  function aplicarPlazo(inspId, scope, fecha){
+    var ins = inspById(inspId); if(!ins) return;
+    if(fecha && fecha < isoToday()){ toast("El plazo no puede ser anterior a hoy."); return; }
+    var com = scope.indexOf("c:") === 0 ? +scope.slice(2) : null;
+    var list = state.puntos.filter(function(p){
+      if(p.insp !== inspId) return false;
+      if(scope === "sin") return !p.plazo;
+      if(com !== null) return (p.comuna || 0) === com;
+      return true;
+    });
+    if(!list.length){ toast("No hay puntos que cumplan ese criterio."); return; }
+    var ids = list.map(function(p){ return p.id; });
+    var donde = scope === "sin" ? "los que no tenían plazo" : (com !== null ? (com ? "comuna " + com : "sin comuna") : "todos");
+    BE.setPlazo(ids, fecha || null).then(function(){
+      addLog(fecha ? "Cambiar plazo" : "Quitar plazo", ins.nombre, com ? "C" + com : "", ids.length, (fecha ? "nuevo plazo " + fmtISO(fecha) : "plazo quitado") + " · " + donde);
+      toast((fecha ? "Plazo " + fmtISO(fecha) + " aplicado" : "Plazo quitado") + " a " + ids.length + " puntos de " + ins.nombre + ".");
+      scheduleRender();
+    }).catch(function(e){ toast("No se pudo cambiar el plazo: " + (e.code || e.message), 7000); });
   }
   function assignForm(i, lic, S){
     if(lic) return '<div class="form"><span class="badge bad">Bloqueado: está de licencia hasta ' + fmtISO(estadoInsp(i).lic.hasta) + '</span><div class="note" style="margin-top:6px">No se le puede asignar hasta que termine la licencia (se libera solo).</div></div>';
@@ -2276,7 +2320,7 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
   }
   function renderCard(){
     var el = document.getElementById("pcard"), p = state.selPoint ? idx.get(state.selPoint) : null;
-    if(!p){ el.hidden = true; return; }
+    if(!p){ el.hidden = true; renderCard._last = null; return; }
     var ins = p.insp ? inspById(p.insp) : null, cm = p.comuna ? comuna(p.comuna) : null;
     var h = '<button class="x" data-act="cardX">×</button><h3>' + esc(p.dir || "(sin dirección)") + '</h3>';
     h += '<div style="margin-bottom:6px">' + (ins ? '<span class="badge ok">Asignado a ' + esc(ins.nombre) + '</span>' : '<span class="badge warn">Pendiente</span>') + '</div>';
@@ -2291,13 +2335,17 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       var v = p.datos[k]; if(v === "" || v == null || shown >= 14) return;
       h += '<div class="kv"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + '</div></div>'; shown++;
     });
+    if(p.insp) h += '<div class="plzrow"><input type="date" id="pcPlz" min="' + isoToday() + '" value="' + esc(p.plazo || "") + '">' +
+      '<button class="btn sm" data-act="ptPlz" data-id="' + p.id + '">Cambiar plazo</button>' +
+      (p.plazo ? '<button class="btn sm" data-act="ptPlzQuit" data-id="' + p.id + '">Quitar</button>' : "") + '</div>';
     h += '<div class="acts">';
     var sel = inspById(state.form.inspId);
     if(p.lat != null && !p.insp && sel && estadoInsp(sel).k !== "licencia") h += '<button class="btn sm primary" data-act="ptAsig" data-id="' + p.id + '">Asignar a ' + esc(sel.nombre) + '</button>';
     if(p.insp) h += '<button class="btn sm" data-act="ptUn" data-id="' + p.id + '">Quitar asignación</button>';
     if(p.lat != null) h += '<a class="btn sm" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=' + p.lat + ',' + p.lon + '">Ver en Google Maps</a>';
     h += '</div>';
-    el.innerHTML = h; el.hidden = false;
+    if(renderCard._last === p.id) keepInputs(el, h); else el.innerHTML = h;   // al cambiar de punto no se arrastra la fecha escrita
+    renderCard._last = p.id; el.hidden = false;
   }
   // cartel de ayuda: aparece en cada ingreso (una vez por pestaña) hasta tocar "Aceptar"
   function renderGuide(){
@@ -2781,6 +2829,25 @@ var COMUNAS_GEO={"type":"FeatureCollection","features":[{"type":"Feature","prope
       case "guideOk": state.guideOk[state.tab] = true; document.getElementById("empty").hidden = true; break;
       case "lboxToggle": state.lboxOpen = !state.lboxOpen; lsSet("pa_lbox", state.lboxOpen ? "1" : "0"); renderLbox(); break;
       case "plzClear": state.form.plazo = ""; renderRight(); schedulePreview(); break;
+      case "plzToggle": state.plzOpen[id] = !state.plzOpen[id]; renderRight(); renderLeft(); break;
+      case "plzApply": {
+        var pzd = document.getElementById("pz-d-" + id).value, pzs = document.getElementById("pz-s-" + id).value;
+        if(!pzd){ toast("Elegí la nueva fecha (o tocá «Quitar plazo»)."); break; }
+        aplicarPlazo(id, pzs, pzd); break; }
+      case "plzQuit": aplicarPlazo(id, document.getElementById("pz-s-" + id).value, ""); break;
+      case "ptPlz": {
+        var pp = idx.get(id); if(!pp || !pp.insp) break;
+        var pf = document.getElementById("pcPlz").value;
+        if(!pf){ toast("Elegí la fecha (o tocá «Quitar»)."); break; }
+        if(pf < isoToday()){ toast("El plazo no puede ser anterior a hoy."); break; }
+        BE.setPlazo([id], pf).then(function(){ addLog("Cambiar plazo (punto suelto)", (inspById(pp.insp) || {}).nombre || "", pp.comuna ? "C" + pp.comuna : "", 1, pp.dir + " · nuevo plazo " + fmtISO(pf)); toast("Plazo cambiado."); scheduleRender(); })
+          .catch(function(e){ toast("No se pudo cambiar el plazo: " + (e.code || e.message)); });
+        break; }
+      case "ptPlzQuit": {
+        var pq = idx.get(id); if(!pq || !pq.insp) break;
+        BE.setPlazo([id], null).then(function(){ addLog("Quitar plazo (punto suelto)", (inspById(pq.insp) || {}).nombre || "", pq.comuna ? "C" + pq.comuna : "", 1, pq.dir); toast("Plazo quitado."); scheduleRender(); })
+          .catch(function(e){ toast("No se pudo quitar el plazo: " + (e.code || e.message)); });
+        break; }
     }
   }
   function addFormRow(c){
